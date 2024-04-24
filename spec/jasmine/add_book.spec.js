@@ -1,21 +1,23 @@
 //https://jasmine.github.io/archives/2.0/introduction#:~:text=Jasmine%20has%20test%20double%20functions,matchers%20for%20interacting%20with%20spies.
-describe("add_this", function() {
+describe("add_this function", function() {
     var originalFirebase;
     var setSpy, docSpy, collectionSpy;
     var fakePromise;
 
     beforeEach(function() {
-        setSpy = jasmine.createSpy('set').and.callFake(() => Promise.resolve("Document successfully written!"));
+        setSpy = jasmine.createSpy('set').and.returnValue(Promise.resolve("Document successfully written!"));
         docSpy = jasmine.createSpy('doc').and.returnValue({ set: setSpy });
         collectionSpy = jasmine.createSpy('collection').and.returnValue({ doc: docSpy });
 
-        originalFirebase = firebase.firestore;
-        firebase.firestore = jasmine.createSpy('firestore').and.returnValue({
-            collection: collectionSpy
-        });
-
-        spyOn(window, 'alert');
-        spyOn(window, 'location', 'get').and.returnValue({});
+        // Replace firebase with a mock
+        originalFirebase = firebase;
+        firebase = {
+            firestore: jasmine.createSpy('firestore').and.returnValue({
+                collection: collectionSpy
+            }),
+            initializeApp: jasmine.createSpy('initializeApp'),
+            auth: jasmine.createSpyObj('auth', ['onAuthStateChanged'])
+        };
 
         document.body.innerHTML = `
             <input id="book_code" value="1234">
@@ -26,18 +28,24 @@ describe("add_this", function() {
             <input id="tags" value="test, book">
         `;
 
-        fakePromise = Promise.resolve();
+        spyOn(window, 'alert');
+        spyOn(window.location, 'assign').and.callFake(function(url) {
+            console.log("Redirecting to " + url);
+        });
+
+        firebase.auth().onAuthStateChanged.and.callFake(function(callback) {
+            callback(true);
+        });
     });
 
     afterEach(function() {
-
-        firebase.firestore = originalFirebase;
+        firebase = originalFirebase;
     });
 
-    it("should attempt to add a book to the database", function(done) {
+    it("should attempt to add a book to Firestore and handle success", function(done) {
         add_this();
 
-        setTimeout(() => { // Timeout to allow Promise resolution
+        setTimeout(() => {
             expect(firebase.firestore).toHaveBeenCalled();
             expect(collectionSpy).toHaveBeenCalledWith("books");
             expect(docSpy).toHaveBeenCalledWith("1234");
@@ -49,27 +57,21 @@ describe("add_this", function() {
                 subject: "Test Subject",
                 tags: "test, book"
             });
-            done();
-        }, 1);
-    });
-
-    it("should alert the user when the book is successfully added", function(done) {
-        add_this();
-
-        fakePromise.then(() => {
             expect(window.alert).toHaveBeenCalledWith("Successfully Book Added");
+            expect(window.location.assign).toHaveBeenCalledWith('admin_portal.html');
             done();
-        });
+        }, 10);
     });
 
-    it("should handle errors correctly", function(done) {
-        setSpy.and.callFake(() => Promise.reject(new Error("Error writing document")));
+    it("should handle Firestore errors correctly", function(done) {
+        // Simulate a Firestore error
+        setSpy.and.returnValue(Promise.reject(new Error("Error writing document")));
+
         add_this();
 
-        fakePromise.catch((error) => {
-            expect(window.alert).not.toHaveBeenCalledWith("Successfully Book Added");
-            expect(console.error).toHaveBeenCalledWith("Error writing document: ", error);
+        setTimeout(() => {
+            expect(console.error).toHaveBeenCalledWith("Error writing document: ", jasmine.any(Error));
             done();
-        });
+        }, 10);
     });
 });
